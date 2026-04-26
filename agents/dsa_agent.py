@@ -1,12 +1,16 @@
 """
 LangGraph-based agent for DSA problem solving.
-Implements stateful conversation management with memory and context.
+Implements stateful conversation management with memory and retrieval.
 """
 from typing import TypedDict, List, Dict, Any, Optional
-from langgraph.graph import StateGraph, END
-from langchain.schema import SystemMessage, HumanMessage, AIMessage
+from datetime import datetime
 import uuid
-import json
+import re
+
+from langgraph.graph import StateGraph, END
+
+from services.mongo_store import MongoChatStore
+from services.langchain_qdrant import LangchainQdrantService
 
 # Type definitions for state management
 class ChatState(TypedDict):
@@ -26,23 +30,28 @@ class ChatState(TypedDict):
 class DSAConversationAgent:
     """Manages stateful DSA conversations using LangGraph."""
 
-    def __init__(self, llm_client, system_prompt):
+    def __init__(
+        self,
+        llm_client,
+        system_prompt: str,
+        chat_store: MongoChatStore,
+        vector_service: LangchainQdrantService,
+    ):
         self.llm_client = llm_client
         self.system_prompt = system_prompt
+        self.chat_store = chat_store
+        self.vector_service = vector_service
         self.workflow = self._create_workflow()
         self.app = self.workflow.compile()
 
     def _create_workflow(self) -> StateGraph:
         """Create LangGraph workflow for DSA conversations."""
         workflow = StateGraph(ChatState)
-
-        # Define nodes
         workflow.add_node("initializer", self._initialize_conversation)
         workflow.add_node("analyzer", self._analyze_problem)
         workflow.add_node("responder", self._generate_response)
         workflow.add_node("updater", self._update_state)
 
-        # Define edges
         workflow.set_entry_point("initializer")
         workflow.add_edge("initializer", "analyzer")
         workflow.add_edge("analyzer", "responder")
@@ -57,15 +66,19 @@ class DSAConversationAgent:
             state["session_id"] = str(uuid.uuid4())
 
         if not state.get("messages"):
-            state["messages"] = [
-                {"role": "system", "content": self.system_prompt}
-            ]
+            state["messages"] = []
+
+        if not state["messages"] or state["messages"][0].get("role") != "system":
+            state["messages"].insert(0, {"role": "system", "content": self.system_prompt})
 
         state["metadata"] = {
-            "created_at": "now",
-            "updated_at": "now",
-            "status": "initialized"
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "status": "initialized",
         }
+
+        if "problem_history" not in state or state["problem_history"] is None:
+            state["problem_history"] = []
 
         return state
 
@@ -75,140 +88,100 @@ class DSAConversationAgent:
         if last_message["role"] != "user":
             return state
 
-        content = last_message["content"]
-
-        # Simple pattern detection (placeholder for actual analysis)
+        content = last_message["content"].strip()
         state["current_problem"] = content
         state["difficulty_level"] = self._estimate_difficulty(content)
         state["current_topic"] = self._detect_topic(content)
         state["problem_history"].append(content)
 
+        similar_documents = self.vector_service.semantic_search(content, top_k=3)
+        if similar_documents:
+            state["metadata"]["related_context"] = [
+                {
+                    "content": doc.page_content,
+                    **doc.metadata,
+                }
+                for doc in similar_documents
+            ]
+
         return state
 
     def _generate_response(self, state: ChatState) -> ChatState:
-        """Generate response using LLM."""
-        try:
-            # Use the last user message
-            user_message = state["messages"][-1]
-            if user_message["role"] != "user":
-                return state
+        """Generate response using LLM and retrieved graph context."""
+        user_message = state["messages"][-1]
+        if user_message["role"] != "user":
+            return state
 
-            # Build messages for LLM
-            messages = [
-                {"role": m["role"], "content": m["content"]}
-                for m in state["messages"]
-            ]
+        messages = [
+            {"role": message["role"], "content": message["content"]}
+            for message in state["messages"]
+        ]
 
-            # Generate response (simplified - in reality would use streaming)
-            # This is a placeholder for actual Azure OpenAI call
-            response_content = self._simulate_llm_response(state)
+        related_context = state["metadata"].get("related_context", [])
+        if related_context:
+            context_text = "\n\n".join(
+                f"Previous {item.get('role', 'assistant')} memory: {item.get('content', '')}"
+                for item in related_context
+            )
+            messages.insert(
+                1,
+                {
+                    "role": "system",
+                    "content": "Relevant historical context from previous sessions:\n" + context_text,
+                },
+            )
 
-            # Parse structured response
-            response_data = self._parse_structured_response(response_content, state)
+        response_text = self._call_llm(messages)
+        response_data = self._parse_structured_response(response_text)
 
-            state["response"] = response_data["text"]
-            state["complexity_analysis"] = response_data.get("complexity")
-            state["code_samples"] = response_data.get("code_samples", [])
-            state["follow_up_suggestions"] = response_data.get("suggestions", [])
+        state["response"] = response_data["text"]
+        state["complexity_analysis"] = response_data.get("complexity")
+        state["code_samples"] = response_data.get("code_samples", [])
+        state["follow_up_suggestions"] = response_data.get("suggestions", [])
 
-            # Add assistant message to history
-            state["messages"].append({
-                "role": "assistant",
-                "content": response_data["text"]
-            })
+        state["messages"].append({"role": "assistant", "content": response_data["text"]})
+        state["metadata"]["last_response_at"] = datetime.utcnow().isoformat()
 
-            state["metadata"]["last_response_at"] = "now"
+        self.vector_service.add_message_embedding(
+            state["session_id"], "user", user_message["content"]
+        )
+        self.vector_service.add_message_embedding(
+            state["session_id"], "assistant", response_data["text"]
+        )
 
-        except Exception as e:
-            state["response"] = f"Error generating response: {str(e)}"
-            state["metadata"]["error"] = str(e)
+        self.chat_store.update_graph_state(
+            state["session_id"],
+            {
+                "current_problem": state["current_problem"],
+                "current_topic": state["current_topic"],
+                "difficulty_level": state["difficulty_level"],
+                "metadata": state["metadata"],
+            },
+        )
 
         return state
 
-    def _simulate_llm_response(self, state: ChatState) -> str:
-        """Simulate LLM response for demonstration."""
-        problem = state.get("current_problem", "general")
-
-        if "binary search" in problem.lower():
-            return """
-Let me explain Binary Search, a fundamental algorithm for searching in sorted arrays.
-
-**Concept:**
-Binary Search is an efficient algorithm for finding an item in a sorted array.
-It works by repeatedly dividing the search interval in half.
-
-**Approach:**
-1. Compare the target value with the middle element
-2. If equal, we found the target
-3. If target is smaller, search the left half
-4. If target is larger, search the right half
-5. Repeat until found or interval is empty
-
-**Time Complexity:** O(log n)
-**Space Complexity:** O(1) for iterative, O(log n) for recursive
-
-**Python Implementation:**
-```python
-def binary_search(arr, target):
-    left, right = 0, len(arr) - 1
-    while left <= right:
-        mid = (left + right) // 2
-        if arr[mid] == target:
-            return mid
-        elif arr[mid] < target:
-            left = mid + 1
-        else:
-            right = mid - 1
-    return -1
-```
-
-**Suggestions:**
-- Try implementing recursive binary search
-- Practice with variations like finding first/last occurrence
-- Explore problems like "Search in Rotated Sorted Array"
-"""
-        else:
-            return f"""
-I'd be happy to help you understand: {problem}
-
-Let me break this down step by step:
-
-1. First, let's understand the problem requirements
-2. We'll identify the underlying data structure or algorithm pattern
-3. I'll provide a conceptual explanation
-4. We'll analyze time and space complexity
-5. I'll provide code samples in Python and JavaScript
-
-Would you like me to focus on a specific aspect of this topic?
-"""
-
-    def _parse_structured_response(self, response_text: str, state: ChatState) -> Dict:
+    def _parse_structured_response(self, response_text: str) -> Dict[str, Any]:
         """Parse LLM response into structured format."""
-        # In production, this would use structured output from LLM
-        # For now, we'll parse heuristically
-
         return {
-            "text": response_text,
+            "text": response_text or "",
             "complexity": {
-                "time": self._extract_complexity(response_text, "time"),
-                "space": self._extract_complexity(response_text, "space"),
-                "analysis": self._extract_analysis(response_text)
-            } if "Time Complexity" in response_text else None,
+                "time_complexity": self._extract_complexity(response_text, "time"),
+                "space_complexity": self._extract_complexity(response_text, "space"),
+                "explanation": self._extract_analysis(response_text),
+            }
+            if "Time Complexity" in response_text or "Space Complexity" in response_text
+            else None,
             "code_samples": self._extract_code_samples(response_text),
-            "suggestions": self._extract_suggestions(response_text)
+            "suggestions": self._extract_suggestions(response_text),
         }
 
     def _extract_complexity(self, text: str, complexity_type: str) -> str:
-        """Extract complexity from response text."""
-        import re
-
         pattern = r"Time Complexity: ([^\n]+)" if complexity_type == "time" else r"Space Complexity: ([^\n]+)"
         match = re.search(pattern, text)
         return match.group(1).strip() if match else "Not analyzed"
 
     def _extract_analysis(self, text: str) -> str:
-        """Extract complexity analysis from response."""
-        # Look for Analysis section
         if "Analysis:" in text:
             parts = text.split("Analysis:")
             if len(parts) > 1:
@@ -216,72 +189,97 @@ Would you like me to focus on a specific aspect of this topic?
         return ""
 
     def _extract_code_samples(self, text: str) -> List[Dict[str, str]]:
-        """Extract code samples from response text."""
-        import re
-
-        samples = []
-        code_blocks = re.findall(r'```(\w+)\n([\s\S]*?)```', text)
-
-        for language, code in code_blocks:
-            samples.append({
+        code_samples: List[Dict[str, str]] = []
+        for language, code in re.findall(r'```(\w+)\n([\s\S]*?)```', text):
+            code_samples.append({
                 "language": language,
                 "code": code.strip(),
-                "description": ""  # Could extract from preceding text
+                "description": "",
             })
-
-        return samples
+        return code_samples
 
     def _extract_suggestions(self, text: str) -> List[str]:
-        """Extract suggestions from response text."""
-        suggestions = []
-        lines = text.split("\n")
-
-        for line in lines:
+        suggestions: List[str] = []
+        for line in text.splitlines():
             if any(keyword in line.lower() for keyword in ["try", "practice", "suggest", "explore"]):
-                suggestion = line.strip()
-                if suggestion and suggestion != "Suggestions:":
-                    suggestions.append(suggestion.lstrip("* ").strip())
-
+                cleaned = line.strip().lstrip("*- ")
+                if cleaned:
+                    suggestions.append(cleaned)
         return suggestions
 
     def _update_state(self, state: ChatState) -> ChatState:
-        """Update conversation state and metadata."""
-        state["metadata"]["updated_at"] = "now"
+        state["metadata"]["updated_at"] = datetime.utcnow().isoformat()
         state["metadata"]["message_count"] = len(state["messages"])
-
         return state
 
-    async def process_message(self, message: str, session_id: Optional[str] = None) -> Dict:
-        """Process a new message and return structured response."""
-        # Initialize state
-        initial_state: ChatState = {
-            "session_id": session_id or str(uuid.uuid4()),
-            "messages": [],
-            "current_problem": None,
-            "current_topic": None,
-            "difficulty_level": "intermediate",
-            "problem_history": [],
+    def _estimate_difficulty(self, text: str) -> str:
+        normalized = text.lower()
+        if any(keyword in normalized for keyword in ["hard", "challenging", "advanced"]):
+            return "advanced"
+        if any(keyword in normalized for keyword in ["easy", "beginner", "simple"]):
+            return "beginner"
+        return "intermediate"
+
+    def _detect_topic(self, text: str) -> str:
+        normalized = text.lower()
+        if "graph" in normalized:
+            return "graph"
+        if "array" in normalized or "matrix" in normalized:
+            return "array"
+        if "tree" in normalized:
+            return "tree"
+        if "dynamic programming" in normalized or "dp" in normalized:
+            return "dynamic programming"
+        return "general"
+
+    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+        try:
+            completion = self.llm_client.chat_client.chat.completions.create(
+                model=self.llm_client.config.model_name,
+                deployment_id=self.llm_client.config.deployment_name,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=800,
+            )
+
+            choice = completion.choices[0]
+            if hasattr(choice, "message"):
+                content = choice.message.get("content") if isinstance(choice.message, dict) else getattr(choice.message, "content", "")
+            else:
+                content = getattr(choice, "text", "")
+
+            return content.strip()
+        except Exception as exc:
+            return f"Error generating response: {exc}"
+
+    async def process_message(self, message: str, session_id: Optional[str] = None) -> Dict[str, Any]:
+        session = self.chat_store.get_or_create_session(session_id)
+        session_id = session["session_id"]
+        self.chat_store.append_message(session_id, "user", message)
+
+        updated_session = self.chat_store.get_or_create_session(session_id)
+        state: ChatState = {
+            "session_id": session_id,
+            "messages": updated_session["history"],
+            "current_problem": updated_session.get("current_problem"),
+            "current_topic": updated_session.get("current_topic"),
+            "difficulty_level": updated_session.get("difficulty_level", "intermediate"),
+            "problem_history": updated_session.get("problem_history", []),
             "response": None,
             "complexity_analysis": None,
             "code_samples": [],
             "follow_up_suggestions": [],
-            "metadata": {}
+            "metadata": updated_session.get("metadata", {}),
         }
 
-        # Add user message
-        initial_state["messages"].append({
-            "role": "user",
-            "content": message
-        })
-
-        # Run workflow
-        result = await self.app.ainvoke(initial_state)
+        result = await self.app.ainvoke(state)
+        self.chat_store.append_message(session_id, "assistant", result["response"])
 
         return {
-            "session_id": result["session_id"],
+            "session_id": session_id,
             "response": result["response"],
-            "complexity": result["complexity_analysis"],
-            "code_samples": result["code_samples"],
-            "suggestions": result["follow_up_suggestions"],
-            "metadata": result["metadata"]
+            "complexity": result.get("complexity_analysis"),
+            "code_samples": result.get("code_samples", []),
+            "suggestions": result.get("follow_up_suggestions", []),
+            "metadata": result.get("metadata", {}),
         }
