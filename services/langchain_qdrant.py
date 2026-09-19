@@ -6,9 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_openai import AzureOpenAIEmbeddings
 from langchain_core.documents import Document
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    from langchain_community.vectorstores import Qdrant
+from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
@@ -43,14 +41,14 @@ class LangchainQdrantService:
             azure_deployment=self.embedding_deployment,
         )
 
-    def _initialize_vector_store(self) -> Optional[Qdrant]:
+    def _initialize_vector_store(self) -> Optional[QdrantVectorStore]:
         try:
             self._qdrant_client = QdrantClient(url=self.qdrant_url, api_key=self.qdrant_api_key, prefer_grpc=False)
             existing = {c.name for c in self._qdrant_client.get_collections().collections}
             if self.collection_name in existing:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    return Qdrant(
+                    return QdrantVectorStore(
                         client=self._qdrant_client,
                         collection_name=self.collection_name,
                         embeddings=self.embeddings,
@@ -86,7 +84,7 @@ class LangchainQdrantService:
                     )
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
-                    self.vector_store = Qdrant(
+                    self.vector_store = QdrantVectorStore(
                         client=self._qdrant_client,
                         collection_name=self.collection_name,
                         embeddings=self.embeddings,
