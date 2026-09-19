@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>algo_pal — DSA Mentor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <nav class="navbar">
+    <div class="logo">
+      <span class="logo-icon">⚡</span>
+      <span>algo<span class="logo-accent">_pal</span></span>
+    </div>
+    <a href="/new-chat" class="btn-primary">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+      New Chat
+    </a>
+  </nav>
+
+  <main class="sessions-page">
+    <div class="sessions-header">
+      <h1>Your Conversations</h1>
+      <p>Continue a previous session or start a new one</p>
+    </div>
+
+    <div class="sessions-grid" id="sessions-grid"></div>
+
+    <div class="empty-state" id="empty-state" hidden>
+      <div class="empty-icon">💬</div>
+      <h2>No conversations yet</h2>
+      <p>Start your first DSA session to get going</p>
+      <a href="/new-chat" class="btn-primary" style="margin-top:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        Start First Chat
+      </a>
+    </div>
+  </main>
+
+  <script src="/static/js/sessions.js"></script>
+</body>
+</html>

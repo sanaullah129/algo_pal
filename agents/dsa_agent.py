@@ -235,8 +235,7 @@ class DSAConversationAgent:
     def _call_llm(self, messages: List[Dict[str, str]]) -> str:
         try:
             completion = self.llm_client.chat_client.chat.completions.create(
-                model=self.llm_client.config.model_name,
-                deployment_id=self.llm_client.config.deployment_name,
+                model=self.llm_client.config.deployment_name,
                 messages=messages,
                 temperature=0.2,
                 max_tokens=800,

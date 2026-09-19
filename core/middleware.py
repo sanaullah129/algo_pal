@@ -1,14 +1,16 @@
 from fastapi import Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import logging
 import time
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-class RequestLoggingMiddleware:
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware for logging incoming requests."""
 
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         start_time = time.time()
 
         # Log request details
@@ -30,10 +32,10 @@ class RequestLoggingMiddleware:
 
         return response
 
-class ErrorHandlingMiddleware:
+class ErrorHandlingMiddleware(BaseHTTPMiddleware):
     """Middleware for handling errors gracefully."""
 
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         try:
             response = await call_next(request)
 
@@ -45,4 +47,4 @@ class ErrorHandlingMiddleware:
 
         except Exception as e:
             logger.error(f"Unhandled exception: {str(e)}")
-            return {"error": "Internal server error", "status": 500}
+            return JSONResponse({"error": "Internal server error", "status": 500}, status_code=500)

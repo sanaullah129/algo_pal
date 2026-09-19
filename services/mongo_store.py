@@ -93,3 +93,33 @@ class MongoChatStore:
         if not session:
             return {}
         return session.get("graph_state", {})
+
+    def list_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
+        sessions = list(
+            self.collection.find(
+                {},
+                {"session_id": 1, "history": 1, "created_at": 1, "last_accessed": 1},
+            ).sort("last_accessed", -1).limit(limit)
+        )
+        result = []
+        for s in sessions:
+            s.pop("_id", None)
+            history = s.get("history", [])
+            title = next(
+                (m["content"][:80] for m in history if m.get("role") == "user"),
+                "New conversation",
+            )
+            def _isoformat(val):
+                return val.isoformat() if hasattr(val, "isoformat") else str(val) if val else ""
+            result.append({
+                "session_id": s["session_id"],
+                "title": title,
+                "message_count": len(history),
+                "created_at": _isoformat(s.get("created_at")),
+                "last_accessed": _isoformat(s.get("last_accessed")),
+            })
+        return result
+
+    def delete_session(self, session_id: str) -> bool:
+        result = self.collection.delete_one({"session_id": session_id})
+        return result.deleted_count > 0

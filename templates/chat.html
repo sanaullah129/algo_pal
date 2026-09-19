@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>algo_pal — Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <div class="chat-layout">
+
+    <!-- ====== Sidebar ====== -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <a href="/" class="sidebar-logo">
+          ⚡ algo<span style="color:var(--primary)">_pal</span>
+        </a>
+        <a href="/new-chat" class="btn-new">+ New</a>
+      </div>
+      <nav class="sidebar-sessions" id="sidebar-sessions">
+        <div class="sidebar-empty">Loading…</div>
+      </nav>
+    </aside>
+
+    <!-- ====== Main chat ====== -->
+    <main class="chat-main">
+
+      <header class="chat-header">
+        <a href="/" class="btn-back">← Back</a>
+        <span class="session-label">{{ session_id }}</span>
+      </header>
+
+      <div class="messages" id="messages">
+        <div class="chat-welcome">
+          <div class="chat-welcome-icon">⚡</div>
+          <h2>Ask me anything about DSA</h2>
+          <p>Algorithms · Data structures · Complexity analysis · Problem-solving</p>
+          <div class="suggestions-welcome">
+            <button class="suggestion-chip" onclick="useSuggestion(this)">Explain binary search</button>
+            <button class="suggestion-chip" onclick="useSuggestion(this)">What is dynamic programming?</button>
+            <button class="suggestion-chip" onclick="useSuggestion(this)">Explain Big O notation</button>
+            <button class="suggestion-chip" onclick="useSuggestion(this)">How does a hash map work?</button>
+            <button class="suggestion-chip" onclick="useSuggestion(this)">Graph traversal algorithms</button>
+            <button class="suggestion-chip" onclick="useSuggestion(this)">Merge sort vs quick sort</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <div class="input-wrapper">
+          <textarea
+            id="msg-input"
+            placeholder="Ask about algorithms, data structures, complexity analysis…"
+            rows="1"
+          ></textarea>
+          <button id="send-btn" onclick="sendMessage()" title="Send (Enter)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.5"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+        <p class="input-hint">Enter to send &nbsp;·&nbsp; Shift+Enter for new line</p>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- CDN libs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@9/marked.min.js"></script>
+
+  <!-- Inject session id safely via Jinja2 -->
+  <script>window.__SESSION_ID__ = {{ session_id | tojson }};</script>
+  <script src="/static/js/chat.js"></script>
+
+</body>
+</html>

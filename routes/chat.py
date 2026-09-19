@@ -74,3 +74,31 @@ async def chat_endpoint(request: ChatRequest):
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Chat processing error: {exc}")
+
+
+@router.get("/api/sessions", tags=["Sessions"])
+async def list_sessions():
+    """Return all chat sessions with preview info."""
+    return chat_store.list_sessions()
+
+
+@router.get("/api/sessions/{session_id}/history", tags=["Sessions"])
+async def get_session_history(session_id: str):
+    """Return full message history for a session."""
+    history = chat_store.get_history(session_id)
+    serialized = []
+    for msg in history:
+        serialized.append({
+            k: str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
+            for k, v in msg.items()
+        })
+    return {"session_id": session_id, "history": serialized}
+
+
+@router.delete("/api/sessions/{session_id}", tags=["Sessions"])
+async def delete_session(session_id: str):
+    """Delete a chat session."""
+    deleted = chat_store.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {"deleted": True}

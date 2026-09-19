@@ -4,13 +4,22 @@ FastAPI application with modular chat routing and persistence.
 """
 from datetime import datetime
 
+from fastapi.staticfiles import StaticFiles
+
 from core.config import create_app, env_config
 from core.middleware import RequestLoggingMiddleware, ErrorHandlingMiddleware
 from routes.chat import router as chat_router
+from routes.ui import router as ui_router
 
 app = create_app()
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(ErrorHandlingMiddleware)
+
+# Serve static assets (CSS, JS)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Routers — UI routes first so "/" is not shadowed by API routes
+app.include_router(ui_router)
 app.include_router(chat_router)
 
 @app.get("/health", tags=["Health"])
@@ -45,5 +54,6 @@ if __name__ == "__main__":
         host=env_config.get("HOST", "0.0.0.0"),
         port=int(env_config.get("PORT", 8000)),
         reload=env_config.get("DEBUG", False),
-        log_level=env_config.get("LOG_LEVEL", "info")
+        reload_dirs=["agents", "core", "prompts", "routes", "services", "templates", "static"],
+        log_level=env_config.get("LOG_LEVEL", "info"),
     )
